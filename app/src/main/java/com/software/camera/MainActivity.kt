@@ -1,22 +1,27 @@
 package com.software.camera
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.software.camera.databinding.ActivityMainBinding
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flow
 import java.io.File
-import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
+
 
 class MainActivity : AppCompatActivity() {
 
@@ -37,9 +42,6 @@ class MainActivity : AppCompatActivity() {
                 Constants.REQUIRED_PERMISSION,
                 Constants.REQUEST_CODE_PERMISSION
             )
-        }
-        binding.btnTakePhoto.setOnClickListener {
-            takePhoto()
         }
     }
 
@@ -67,7 +69,7 @@ class MainActivity : AppCompatActivity() {
 
             val preview = Preview.Builder().build()
                 .also {
-                    it.setSurfaceProvider(binding.viewFinder.surfaceProvider)
+                    it.setSurfaceProvider(binding.cameraPreview.surfaceProvider)
                 }
             imageCapture = ImageCapture.Builder().build()
             val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
@@ -79,6 +81,31 @@ class MainActivity : AppCompatActivity() {
                 Log.d(Constants.TAG, "startCamera: $e")
             }
         }, ContextCompat.getMainExecutor(this))
+
+        lifecycleScope.launchWhenStarted {
+            tickerFlow(1.seconds).collect {
+                val bitmap = binding.cameraPreview.bitmap ?: return@collect
+                val pixel = bitmap.getPixel(bitmap.width / 2, bitmap.height / 2)
+                val hexColor = java.lang.String.format("#%06X", 0xFFFFFF and pixel)
+                binding.cardView.setCardBackgroundColor(pixel)
+                binding.tvColor.text = hexColor
+            }
+        }
+        binding.cameraPreview.setOnClickListener {
+            val clipboard: ClipboardManager =
+                getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+            val clip = ClipData.newPlainText("color", binding.tvColor.text.toString())
+            clipboard.setPrimaryClip(clip)
+            Toast.makeText(this, "copied to clipboard", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun tickerFlow(period: Duration, initialDelay: Duration = Duration.ZERO) = flow {
+        delay(initialDelay)
+        while (true) {
+            emit(Unit)
+            delay(period)
+        }
     }
 
     private fun allPermissionGranted(): Boolean {
@@ -96,31 +123,4 @@ class MainActivity : AppCompatActivity() {
         return if (mediaDir != null && mediaDir.exists()) mediaDir else filesDir
     }
 
-    private fun takePhoto() {
-        val imageCapture = imageCapture ?: return
-        val fileName = SimpleDateFormat(
-            Constants.FILE_NAME_FORMAT,
-            Locale.getDefault()
-        ).format(System.currentTimeMillis()) + ".jpg"
-        val photoFile = File(
-            outputDirectory,
-            fileName
-        )
-        val outputOption = ImageCapture.OutputFileOptions.Builder(photoFile).build()
-        imageCapture.takePicture(
-            outputOption,
-            ContextCompat.getMainExecutor(this),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    val saveUri = Uri.fromFile(photoFile)
-                    val msg = "Photo saved in $saveUri"
-                    Toast.makeText(baseContext, msg, Toast.LENGTH_SHORT).show()
-                }
-
-                override fun onError(exception: ImageCaptureException) {
-                    Log.e(Constants.TAG, "onError: ${exception.message}", exception)
-                }
-            }
-        )
-    }
 }
